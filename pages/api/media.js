@@ -1,4 +1,5 @@
 import { get } from '@vercel/blob';
+import { Readable } from 'stream';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -7,7 +8,7 @@ export default async function handler(req, res) {
 
   const { url } = req.query;
 
-  if (!url) {
+  if (!url || typeof url !== 'string') {
     return res.status(400).json({
       error: 'URL da mídia é obrigatória',
     });
@@ -16,7 +17,7 @@ export default async function handler(req, res) {
   try {
     const blobUrl = new URL(url);
 
-    const result = await get(blobUrl.pathname, {
+    const result = await get(blobUrl.pathname.replace(/^\/+/, ''), {
       access: 'private',
     });
 
@@ -26,31 +27,25 @@ export default async function handler(req, res) {
       });
     }
 
+    res.statusCode = 200;
+
     res.setHeader(
       'Content-Type',
       result.blob.contentType || 'application/octet-stream'
     );
 
-    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Length', result.blob.size);
+
     res.setHeader('Cache-Control', 'private, no-cache');
+
+    res.setHeader('X-Content-Type-Options', 'nosniff');
 
     if (result.blob.etag) {
       res.setHeader('ETag', result.blob.etag);
     }
 
-    const reader = result.stream.getReader();
+    Readable.fromWeb(result.stream).pipe(res);
 
-    res.status(200);
-
-    while (true) {
-      const { done, value } = await reader.read();
-
-      if (done) break;
-
-      res.write(Buffer.from(value));
-    }
-
-    res.end();
   } catch (error) {
     console.error('Erro ao buscar mídia:', error);
 
