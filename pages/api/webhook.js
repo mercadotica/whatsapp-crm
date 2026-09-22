@@ -1,4 +1,15 @@
 import { getOrCreateContact, saveMessage, sql } from '../../lib/db';
+import { getMediaInfo, downloadMedia } from '../../lib/whatsapp';
+import { storeMedia } from '../../lib/media';
+
+const MEDIA_TYPES = ['audio', 'image', 'video', 'document'];
+
+const LABEL_BY_TYPE = {
+  audio: '[Áudio]',
+  image: '[Imagem]',
+  video: '[Vídeo]',
+  document: '[Documento]',
+};
 
 // A Meta chama esse endpoint de duas formas:
 // GET  -> verificação inicial do webhook (você cola essa URL no painel da Meta)
@@ -40,11 +51,29 @@ async function handleIncoming(req, res) {
           phone: msg.from,
         });
 
-        const body =
+        let body =
           msg.text?.body ||
           msg.button?.text ||
           msg.interactive?.button_reply?.title ||
-          `[mensagem do tipo ${msg.type}]`;
+          null;
+
+        let mediaUrl = null;
+        let mediaMime = null;
+
+        if (MEDIA_TYPES.includes(msg.type) && msg[msg.type]?.id) {
+          try {
+            const mediaInfo = await getMediaInfo(msg[msg.type].id);
+            const buffer = await downloadMedia(mediaInfo.url);
+            mediaUrl = await storeMedia(buffer, mediaInfo.mime_type, msg[msg.type].id);
+            mediaMime = mediaInfo.mime_type;
+            body = body || LABEL_BY_TYPE[msg.type] || `[${msg.type}]`;
+          } catch (mediaErr) {
+            console.error('Erro ao baixar mídia:', mediaErr);
+            body = body || `[${msg.type} - falha ao baixar]`;
+          }
+        }
+
+        body = body || `[mensagem do tipo ${msg.type}]`;
 
         await saveMessage({
           contactId: contact.id,
@@ -53,6 +82,8 @@ async function handleIncoming(req, res) {
           body,
           status: 'received',
           rawPayload: msg,
+          mediaUrl,
+          mediaMime,
         });
       }
     }
