@@ -68,8 +68,11 @@ async function handleIncoming(req, res) {
             mediaMime = mediaInfo.mime_type;
             body = body || LABEL_BY_TYPE[msg.type] || `[${msg.type}]`;
           } catch (mediaErr) {
-            console.error('Erro ao baixar mídia:', mediaErr);
-            body = body || `[${msg.type} - falha ao baixar]`;
+            console.error('Erro ao baixar mídia:', mediaErr, mediaErr.details);
+            // Mostra o motivo real na própria conversa, temporariamente,
+            // pra não depender de olhar logs do servidor pra debugar.
+            const reason = mediaErr.details?.error?.message || mediaErr.message || 'erro desconhecido';
+            body = body || `[${msg.type} - falha ao baixar: ${reason}]`;
           }
         }
 
