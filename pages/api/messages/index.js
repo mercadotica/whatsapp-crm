@@ -1,4 +1,5 @@
 import { sql } from '../../../lib/db';
+import { issueSignedToken, presignUrl } from '@vercel/blob';
 
 // GET /api/messages?contact_id=123
 export default async function handler(req, res) {
@@ -20,16 +21,44 @@ export default async function handler(req, res) {
       ORDER BY created_at ASC
     `;
 
-    const messages = result.rows.map((message) => {
-      if (message.media_url) {
-        return {
-          ...message,
-          media_url: `/api/media?url=${encodeURIComponent(message.media_url)}`,
-        };
-      }
+    const messages = await Promise.all(
+      result.rows.map(async (message) => {
+        if (!message.media_url) {
+          return message;
+        }
 
-      return message;
-    });
+        try {
+          const blobUrl = new URL(message.media_url);
+          const pathname = blobUrl.pathname;
+
+          const validUntil = Date.now() + 60 * 60 * 1000; // 1 hora
+
+          const token = await issueSignedToken({
+            pathname,
+            operations: ['get'],
+            validUntil,
+          });
+
+          const { presignedUrl } = await presignUrl(token, {
+            pathname,
+            operation: 'get',
+            validUntil,
+          });
+
+          return {
+            ...message,
+            media_url: presignedUrl,
+          };
+        } catch (mediaError) {
+          console.error('Erro ao gerar URL da mídia:', mediaError);
+
+          return {
+            ...message,
+            media_url: null,
+          };
+        }
+      })
+    );
 
     return res.status(200).json(messages);
   } catch (error) {
