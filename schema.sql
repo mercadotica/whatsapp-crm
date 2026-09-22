@@ -16,8 +16,14 @@ CREATE TABLE IF NOT EXISTS messages (
   body TEXT,
   status TEXT DEFAULT 'sent',  -- sent, delivered, read, failed, received
   raw_payload JSONB,           -- payload bruto, útil pra debug
+  media_url TEXT,              -- URL pública do áudio/imagem/documento (Vercel Blob)
+  media_mime TEXT,             -- ex: audio/ogg, image/jpeg
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Migração pra quem já tinha o banco criado antes dessa versão:
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_mime TEXT;
 
 CREATE TABLE IF NOT EXISTS campaigns (
   id SERIAL PRIMARY KEY,
