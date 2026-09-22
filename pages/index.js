@@ -7,6 +7,7 @@ export default function Inbox() {
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const audioInputRef = useRef(null);
   const messagesEndRef = useRef(null);
 
   async function loadContacts() {
@@ -57,6 +58,43 @@ export default function Inbox() {
     }
   }
 
+  async function handleAudioFileChange(e) {
+    const file = e.target.files[0];
+    if (!file || !selected) return;
+    setSending(true);
+    try {
+      const base64 = await fileToBase64(file);
+      const res = await fetch('/api/send/audio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contact_id: selected.id,
+          audio_base64: base64,
+          mime_type: file.type,
+          filename: file.name,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error);
+      } else {
+        loadMessages(selected.id);
+      }
+    } finally {
+      setSending(false);
+      e.target.value = '';
+    }
+  }
+
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]); // remove o prefixo data:...;base64,
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
   return (
     <div className="layout">
       <nav className="sidebar">
@@ -93,7 +131,13 @@ export default function Inbox() {
             <div className="messages">
               {messages.map((m) => (
                 <div key={m.id} className={`bubble ${m.direction}`}>
-                  {m.body}
+                  {m.media_url && m.media_mime?.startsWith('audio') ? (
+                    <audio controls src={m.media_url} style={{ maxWidth: 240 }} />
+                  ) : m.media_url && m.media_mime?.startsWith('image') ? (
+                    <img src={m.media_url} alt="imagem recebida" style={{ maxWidth: 240, borderRadius: 6 }} />
+                  ) : (
+                    m.body
+                  )}
                   <div className="meta">
                     {new Date(m.created_at).toLocaleString('pt-BR')} · {m.status}
                   </div>
@@ -111,6 +155,16 @@ export default function Inbox() {
               />
               <button onClick={handleSend} disabled={sending}>
                 {sending ? 'Enviando...' : 'Enviar'}
+              </button>
+              <input
+                type="file"
+                accept="audio/aac,audio/mp4,audio/mpeg,audio/amr,audio/ogg,.mp3,.ogg,.m4a,.amr"
+                ref={audioInputRef}
+                onChange={handleAudioFileChange}
+                style={{ display: 'none' }}
+              />
+              <button onClick={() => audioInputRef.current?.click()} disabled={sending} title="Enviar arquivo de áudio (mp3, ogg, m4a...)">
+                🎵 Áudio
               </button>
             </div>
           </>

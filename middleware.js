@@ -13,7 +13,7 @@ export function middleware(req) {
 
   if (auth === expected) {
     return NextResponse.next();
-  }
+  }  
 
   return new NextResponse('Autenticação necessária', {
     status: 401,

@@ -7,10 +7,25 @@ que você respeite os limites de tier da sua conta.
 ## O que faz
 - Recebe mensagens do WhatsApp via webhook e salva no banco (pra você ver de novo,
   já que perdeu o acesso pelo celular ao migrar o número pra API)
+- Recebe e toca **áudios** (e mostra imagens) direto no dashboard — o arquivo é
+  baixado da Meta e guardado no Vercel Blob
+- **Envia áudio** também: botão "🎵 Áudio" na conversa, você escolhe um arquivo
+  .mp3/.ogg/.m4a/.amr do computador (gravação direta do navegador não é usada
+  porque o formato nativo do navegador — WebM — não é aceito pela Meta sem
+  conversão)
 - Envia mensagem individual (dentro da janela de 24h) ou por template (a qualquer hora)
 - Importa lista de clientes via CSV e dispara em massa, em lotes, com intervalo entre
   mensagens
 - Dashboard simples: Inbox (conversas) + Contatos/Disparo
+
+## 0. Migração (se você já tinha o banco criado antes)
+Rode de novo o `schema.sql` — ele tem `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
+pras colunas novas de mídia (`media_url`, `media_mime`), então é seguro rodar de
+novo sem duplicar nada.
+
+Crie também um **Blob Store** na Vercel: no seu projeto → Storage → Blob →
+Create → Connect ao projeto. Isso gera a variável `BLOB_READ_WRITE_TOKEN`
+automaticamente (tier gratuito cobre bastante volume de áudio).
 
 ## 1. Banco de dados
 Crie um Postgres (mais simples: no próprio dashboard da Vercel → **Storage → Postgres**,
