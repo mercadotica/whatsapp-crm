@@ -1177,7 +1177,6 @@ export default function Inbox() {
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
-          color: #111827;
           font-size: 13px;
         }
 
@@ -1610,5 +1609,3 @@ export default function Inbox() {
     </>
   );
 }
-
-
