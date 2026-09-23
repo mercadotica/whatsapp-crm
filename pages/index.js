@@ -1003,24 +1003,6 @@ export default function Inbox() {
           flex-direction: column;
           gap: 5px;
         }
-        
-        .menu-item,
-        .menu-item:visited,
-        .menu-item:active {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 12px;
-          border-radius: 9px;
-
-          color: #ffd400;
-          text-decoration: none;
-
-          font-size: 13px;
-          font-weight: 600;
-
-          transition: 0.2s;
-        }
 
         .menu-item {
           display: flex;
@@ -1035,14 +1017,8 @@ export default function Inbox() {
         }
 
         .menu-item:hover {
-          background: rgba(255, 255, 255, 0.12);
-          color: #ffffff;
-        }
-
-        .menu-item.active,
-        .menu-item.active:visited {
-          background: rgba(255, 255, 255, 0.15);
-          color: #ffd400;
+          background: #1f2937;
+          color: white;
         }
 
         .menu-item.active {
@@ -1609,11 +1585,7 @@ export default function Inbox() {
           }
 
           .main-sidebar {
-            display: flex;
-            flex-direction: column;
-            background: #0b5ed7;
-            color: white;
-            padding: 20px 14px;
+            display: none;
           }
 
           .conversation-panel {
