@@ -12,9 +12,43 @@ export default function Inbox() {
   const [showEmoji, setShowEmoji] = useState(false);
 
   const audioInputRef = useRef(null);
-  const imageInputRef = useRef(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+
+  // ============================================================
+  // FUNÇÕES DE SEGURANÇA
+  // ============================================================
+
+  function safeText(value, fallback = '') {
+    if (value === null || value === undefined) {
+      return fallback;
+    }
+
+    if (typeof value === 'string') {
+      return value;
+    }
+
+    if (
+      typeof value === 'number' ||
+      typeof value === 'boolean'
+    ) {
+      return String(value);
+    }
+
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return fallback;
+    }
+  }
+
+  function safeId(value) {
+    if (value === null || value === undefined) {
+      return '';
+    }
+
+    return String(value);
+  }
 
   // ============================================================
   // CONTATOS
@@ -23,13 +57,31 @@ export default function Inbox() {
   async function loadContacts() {
     try {
       const res = await fetch('/api/contacts');
+
       const data = await res.json();
 
-      if (Array.isArray(data)) {
-        setContacts(data);
+      if (!res.ok) {
+        console.error(
+          'Erro ao carregar contatos:',
+          data
+        );
+        return;
       }
+
+      if (!Array.isArray(data)) {
+        console.error(
+          'Resposta inválida de /api/contacts:',
+          data
+        );
+        return;
+      }
+
+      setContacts(data);
     } catch (error) {
-      console.error('Erro ao carregar contatos:', error);
+      console.error(
+        'Erro ao carregar contatos:',
+        error
+      );
     }
   }
 
@@ -37,29 +89,58 @@ export default function Inbox() {
   // MENSAGENS
   // ============================================================
 
-async function loadMessages(contactId) {
-  try {
-    const res = await fetch(
-      `/api/messages?contact_id=${encodeURIComponent(contactId)}`
-    );
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      console.error('Erro da API de mensagens:', data);
+  async function loadMessages(contactId) {
+    if (
+      contactId === null ||
+      contactId === undefined ||
+      contactId === ''
+    ) {
       setMessages([]);
       return;
     }
 
-    setMessages(Array.isArray(data) ? data : []);
-  } catch (error) {
-    console.error('Erro ao carregar mensagens:', error);
-    setMessages([]);
+    try {
+      const res = await fetch(
+        `/api/messages?contact_id=${encodeURIComponent(
+          contactId
+        )}`
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        console.error(
+          'Erro da API de mensagens:',
+          data
+        );
+
+        setMessages([]);
+        return;
+      }
+
+      if (!Array.isArray(data)) {
+        console.error(
+          'Resposta inválida de /api/messages:',
+          data
+        );
+
+        setMessages([]);
+        return;
+      }
+
+      setMessages(data);
+    } catch (error) {
+      console.error(
+        'Erro ao carregar mensagens:',
+        error
+      );
+
+      setMessages([]);
+    }
   }
-}
 
   // ============================================================
-  // CARREGA CONTATOS
+  // CARREGAR CONTATOS
   // ============================================================
 
   useEffect(() => {
@@ -73,51 +154,98 @@ async function loadMessages(contactId) {
   }, []);
 
   // ============================================================
-  // CARREGA CONVERSA
-  // ============================================================
-
-useEffect(() => {
-  if (!selectedContactId) {
-    setMessages([]);
-    return;
-  }
-
-  loadMessages(selectedContactId);
-
-  const interval = setInterval(() => {
-    loadMessages(selectedContactId);
-  }, 5000);
-
-  return () => clearInterval(interval);
-}, [selectedContactId]);
-
-  // ============================================================
-  // SCROLL AUTOMÁTICO
+  // CARREGAR MENSAGENS DO CONTATO
   // ============================================================
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({
-      behavior: 'smooth',
-    });
-  }, [messages]);
+    if (!selectedContactId) {
+      setMessages([]);
+      return;
+    }
+
+    loadMessages(selectedContactId);
+
+    const interval = setInterval(() => {
+      loadMessages(selectedContactId);
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [selectedContactId]);
 
   // ============================================================
-  // ENVIAR MENSAGEM
+  // SCROLL
+  // ============================================================
+
+  useEffect(() => {
+    if (!selectedContactId) return;
+
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({
+        behavior: 'smooth',
+      });
+    }, 100);
+  }, [messages, selectedContactId]);
+
+  // ============================================================
+  // SELECIONAR CONTATO
+  // ============================================================
+
+  function handleSelectContact(contact) {
+    if (!contact) return;
+
+    const id = safeId(contact.id);
+
+    console.log(
+      'Contato selecionado:',
+      contact
+    );
+
+    console.log(
+      'ID do contato:',
+      id
+    );
+
+    if (!id) {
+      console.error(
+        'Contato sem ID:',
+        contact
+      );
+
+      return;
+    }
+
+    setSelected(contact);
+    setSelectedContactId(id);
+    setMessages([]);
+    setDraft('');
+    setShowEmoji(false);
+  }
+
+  // ============================================================
+  // ENVIAR TEXTO
   // ============================================================
 
   async function handleSend() {
-    if (!draft.trim() || !selected || sending) return;
+    if (
+      !draft.trim() ||
+      !selectedContactId ||
+      sending
+    ) {
+      return;
+    }
 
     setSending(true);
 
     try {
       const res = await fetch('/api/send/single', {
         method: 'POST',
+
         headers: {
           'Content-Type': 'application/json',
         },
+
         body: JSON.stringify({
-          contact_id: selected.id,
+          contact_id: selectedContactId,
           body: draft,
         }),
       });
@@ -125,29 +253,45 @@ useEffect(() => {
       const data = await res.json();
 
       if (!res.ok) {
-        alert(data.error || 'Erro ao enviar mensagem.');
+        alert(
+          data?.error ||
+            'Erro ao enviar mensagem.'
+        );
+
         return;
       }
 
       setDraft('');
       setShowEmoji(false);
 
-      await loadMessages(selected.id);
+      await loadMessages(
+        selectedContactId
+      );
     } catch (error) {
-      console.error(error);
-      alert('Erro ao enviar mensagem.');
+      console.error(
+        'Erro ao enviar mensagem:',
+        error
+      );
+
+      alert(
+        'Erro ao enviar mensagem.'
+      );
     } finally {
       setSending(false);
     }
   }
 
   // ============================================================
-  // TECLA ENTER
+  // ENTER
   // ============================================================
 
   function handleKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (
+      e.key === 'Enter' &&
+      !e.shiftKey
+    ) {
       e.preventDefault();
+
       handleSend();
     }
   }
@@ -159,39 +303,68 @@ useEffect(() => {
   async function handleAudioFileChange(e) {
     const file = e.target.files?.[0];
 
-    if (!file || !selected) return;
+    if (
+      !file ||
+      !selectedContactId
+    ) {
+      return;
+    }
 
     setSending(true);
 
     try {
-      const base64 = await fileToBase64(file);
+      const base64 =
+        await fileToBase64(file);
 
-      const res = await fetch('/api/send/audio', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contact_id: selected.id,
-          audio_base64: base64,
-          mime_type: file.type,
-          filename: file.name,
-        }),
-      });
+      const res = await fetch(
+        '/api/send/audio',
+        {
+          method: 'POST',
+
+          headers: {
+            'Content-Type':
+              'application/json',
+          },
+
+          body: JSON.stringify({
+            contact_id:
+              selectedContactId,
+
+            audio_base64: base64,
+
+            mime_type: file.type,
+
+            filename: file.name,
+          }),
+        }
+      );
 
       const data = await res.json();
 
       if (!res.ok) {
-        alert(data.error || 'Erro ao enviar áudio.');
+        alert(
+          data?.error ||
+            'Erro ao enviar áudio.'
+        );
+
         return;
       }
 
-      await loadMessages(selected.id);
+      await loadMessages(
+        selectedContactId
+      );
     } catch (error) {
-      console.error(error);
-      alert('Erro ao enviar áudio.');
+      console.error(
+        'Erro ao enviar áudio:',
+        error
+      );
+
+      alert(
+        'Erro ao enviar áudio.'
+      );
     } finally {
       setSending(false);
+
       e.target.value = '';
     }
   }
@@ -201,17 +374,29 @@ useEffect(() => {
   // ============================================================
 
   function fileToBase64(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
+    return new Promise(
+      (resolve, reject) => {
+        const reader =
+          new FileReader();
 
-      reader.onload = () => {
-        resolve(reader.result.split(',')[1]);
-      };
+        reader.onload = () => {
+          const result =
+            safeText(
+              reader.result
+            );
 
-      reader.onerror = reject;
+          resolve(
+            result.includes(',')
+              ? result.split(',')[1]
+              : result
+          );
+        };
 
-      reader.readAsDataURL(file);
-    });
+        reader.onerror = reject;
+
+        reader.readAsDataURL(file);
+      }
+    );
   }
 
   // ============================================================
@@ -259,7 +444,10 @@ useEffect(() => {
   ];
 
   function addEmoji(emoji) {
-    setDraft((prev) => prev + emoji);
+    setDraft(
+      (prev) =>
+        `${prev}${emoji}`
+    );
 
     setTimeout(() => {
       inputRef.current?.focus();
@@ -267,51 +455,90 @@ useEffect(() => {
   }
 
   // ============================================================
-  // FILTRO DE CONTATOS
+  // FILTRO
   // ============================================================
 
-  const filteredContacts = contacts.filter((contact) => {
-    const text = `${contact.name || ''} ${
-      contact.phone || ''
-    }`.toLowerCase();
+  const filteredContacts =
+    contacts.filter((contact) => {
+      if (!contact) {
+        return false;
+      }
 
-    return text.includes(search.toLowerCase());
-  });
+      const name =
+        safeText(contact.name);
+
+      const phone =
+        safeText(contact.phone);
+
+      const text =
+        `${name} ${phone}`
+          .toLowerCase();
+
+      return text.includes(
+        search.toLowerCase()
+      );
+    });
 
   // ============================================================
-  // FORMATA HORÁRIO
+  // HORÁRIO
   // ============================================================
 
   function formatTime(date) {
     if (!date) return '';
 
-    return new Date(date).toLocaleTimeString('pt-BR', {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    try {
+      const parsed =
+        new Date(date);
+
+      if (
+        Number.isNaN(
+          parsed.getTime()
+        )
+      ) {
+        return '';
+      }
+
+      return parsed.toLocaleTimeString(
+        'pt-BR',
+        {
+          hour: '2-digit',
+          minute: '2-digit',
+        }
+      );
+    } catch {
+      return '';
+    }
   }
 
   // ============================================================
-  // FORMATA DATA
+  // DATA
   // ============================================================
 
   function formatDate(date) {
     if (!date) return '';
 
-    const messageDate = new Date(date);
-    const today = new Date();
+    try {
+      const parsed =
+        new Date(date);
 
-    if (
-      messageDate.toDateString() ===
-      today.toDateString()
-    ) {
-      return formatTime(date);
+      if (
+        Number.isNaN(
+          parsed.getTime()
+        )
+      ) {
+        return '';
+      }
+
+      return parsed.toLocaleDateString(
+        'pt-BR',
+        {
+          day: '2-digit',
+          month: '2-digit',
+        }
+      );
+    } catch {
+      return '';
     }
-
-    return messageDate.toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-    });
   }
 
   // ============================================================
@@ -319,35 +546,78 @@ useEffect(() => {
   // ============================================================
 
   function getInitial(contact) {
-    const name = contact?.name || contact?.phone || '?';
+    if (!contact) {
+      return '?';
+    }
 
-    return name.charAt(0).toUpperCase();
+    const name =
+      safeText(
+        contact.name
+      ).trim();
+
+    const phone =
+      safeText(
+        contact.phone
+      ).trim();
+
+    const value =
+      name || phone || '?';
+
+    return value
+      .charAt(0)
+      .toUpperCase();
   }
 
   // ============================================================
-  // STATUS DA MENSAGEM
+  // ÚLTIMA MENSAGEM
+  // ============================================================
+
+  function getLastMessage(contact) {
+    if (!contact) {
+      return '';
+    }
+
+    const last =
+      contact.last_message ??
+      contact.lastMessage;
+
+    if (
+      last !== null &&
+      last !== undefined &&
+      last !== ''
+    ) {
+      return safeText(last);
+    }
+
+    return 'Nenhuma mensagem';
+  }
+
+  // ============================================================
+  // STATUS
   // ============================================================
 
   function getStatusIcon(status) {
-    if (!status) return '✓';
+    const value =
+      safeText(status)
+        .toLowerCase();
 
     if (
-      status === 'read' ||
-      status === 'lido'
+      value === 'read' ||
+      value === 'lido'
     ) {
       return '✓✓';
     }
 
     if (
-      status === 'delivered' ||
-      status === 'entregue'
+      value === 'delivered' ||
+      value === 'entregue'
     ) {
       return '✓✓';
     }
 
     if (
-      status === 'failed' ||
-      status === 'falhou'
+      value === 'failed' ||
+      value === 'falhou'
     ) {
       return '!';
     }
@@ -356,28 +626,35 @@ useEffect(() => {
   }
 
   // ============================================================
-  // ÚLTIMA MENSAGEM
+  // MEDIA
   // ============================================================
 
-  function getLastMessage(contact) {
-    return (
-      contact.last_message ||
-      contact.lastMessage ||
-      'Nenhuma mensagem'
-    );
+  function getMediaType(message) {
+    if (!message) {
+      return '';
+    }
+
+    return safeText(
+      message.media_mime
+    ).toLowerCase();
   }
+
+  // ============================================================
+  // RENDER
+  // ============================================================
 
   return (
     <>
       <div className="crm-app">
 
-        {/* ======================================================
+        {/* =====================================================
             SIDEBAR
-        ====================================================== */}
+        ===================================================== */}
 
         <aside className="main-sidebar">
 
           <div className="brand">
+
             <div className="brand-icon">
               💬
             </div>
@@ -391,6 +668,7 @@ useEffect(() => {
                 Atendimento
               </div>
             </div>
+
           </div>
 
           <nav className="main-menu">
@@ -408,30 +686,38 @@ useEffect(() => {
               className="menu-item"
             >
               <span>👥</span>
-              <span>Contatos &amp; Disparo</span>
+              <span>
+                Contatos &amp; Disparo
+              </span>
             </Link>
 
           </nav>
 
           <div className="sidebar-bottom">
+
             <div className="connection-status">
+
               <span className="online-dot"></span>
 
               <div>
-                <strong>WhatsApp conectado</strong>
+                <strong>
+                  WhatsApp conectado
+                </strong>
 
                 <small>
                   Sistema online
                 </small>
               </div>
+
             </div>
+
           </div>
 
         </aside>
 
-        {/* ======================================================
+        {/* =====================================================
             LISTA DE CONVERSAS
-        ====================================================== */}
+        ===================================================== */}
 
         <section className="conversation-panel">
 
@@ -461,7 +747,9 @@ useEffect(() => {
               placeholder="Pesquisar conversa..."
               value={search}
               onChange={(e) =>
-                setSearch(e.target.value)
+                setSearch(
+                  e.target.value
+                )
               }
             />
 
@@ -469,60 +757,94 @@ useEffect(() => {
 
           <div className="conversation-list">
 
-            {filteredContacts.map((contact) => (
+            {filteredContacts.map(
+              (contact, index) => {
 
-              <button
-                key={contact.id}
-                type="button"
-                className={`conversation-item ${
-                  selected?.id === contact.id
-                    ? 'selected'
-                    : ''
-                }`}
-                onClick={() => {
-                  setSelectedContactId(contact.id);
-                  setSelected(contact);
-                  setShowEmoji(false);
-                }}
-              >
+                if (!contact) {
+                  return null;
+                }
 
-                <div className="avatar">
-                  {getInitial(contact)}
-                </div>
+                const contactId =
+                  safeId(contact.id);
 
-                <div className="conversation-info">
+                const name =
+                  safeText(
+                    contact.name
+                  );
 
-                  <div className="conversation-top">
+                const phone =
+                  safeText(
+                    contact.phone
+                  );
 
-                    <strong>
-                      {contact.name ||
-                        contact.phone}
-                    </strong>
+                const displayName =
+                  name ||
+                  phone ||
+                  'Contato';
 
-                    <span>
-                      {formatDate(
-                        contact.updated_at ||
-                          contact.created_at
+                return (
+                  <button
+                    key={
+                      `${contactId || 'contato'}-${index}`
+                    }
+                    type="button"
+                    className={`conversation-item ${
+                      safeId(
+                        selected?.id
+                      ) ===
+                      contactId
+                        ? 'selected'
+                        : ''
+                    }`}
+                    onClick={() =>
+                      handleSelectContact(
+                        contact
+                      )
+                    }
+                  >
+
+                    <div className="avatar">
+                      {getInitial(
+                        contact
                       )}
-                    </span>
+                    </div>
 
-                  </div>
+                    <div className="conversation-info">
 
-                  <div className="conversation-bottom">
+                      <div className="conversation-top">
 
-                    <span>
-                      {getLastMessage(contact)}
-                    </span>
+                        <strong>
+                          {displayName}
+                        </strong>
 
-                  </div>
+                        <span>
+                          {formatDate(
+                            contact.updated_at ||
+                              contact.created_at
+                          )}
+                        </span>
 
-                </div>
+                      </div>
 
-              </button>
+                      <div className="conversation-bottom">
 
-            ))}
+                        <span>
+                          {getLastMessage(
+                            contact
+                          )}
+                        </span>
 
-            {filteredContacts.length === 0 && (
+                      </div>
+
+                    </div>
+
+                  </button>
+                );
+              }
+            )}
+
+            {filteredContacts.length ===
+              0 && (
 
               <div className="empty-conversations">
 
@@ -535,8 +857,9 @@ useEffect(() => {
                 </strong>
 
                 <span>
-                  Quando alguém enviar uma
-                  mensagem, ela aparecerá aqui.
+                  Quando alguém enviar
+                  uma mensagem, ela
+                  aparecerá aqui.
                 </span>
 
               </div>
@@ -547,9 +870,9 @@ useEffect(() => {
 
         </section>
 
-        {/* ======================================================
+        {/* =====================================================
             CHAT
-        ====================================================== */}
+        ===================================================== */}
 
         <main className="chat">
 
@@ -566,8 +889,9 @@ useEffect(() => {
               </h2>
 
               <p>
-                Selecione uma conversa para
-                começar o atendimento.
+                Selecione uma conversa
+                para começar o
+                atendimento.
               </p>
 
             </div>
@@ -583,18 +907,27 @@ useEffect(() => {
                 <div className="chat-contact">
 
                   <div className="avatar large">
-                    {getInitial(selected)}
+                    {getInitial(
+                      selected
+                    )}
                   </div>
 
                   <div>
 
                     <strong>
-                      {selected.name ||
-                        selected.phone}
+                      {safeText(
+                        selected.name
+                      ) ||
+                        safeText(
+                          selected.phone
+                        ) ||
+                        'Contato'}
                     </strong>
 
                     <span>
-                      {selected.phone}
+                      {safeText(
+                        selected.phone
+                      )}
                     </span>
 
                   </div>
@@ -627,176 +960,224 @@ useEffect(() => {
 
                 <div className="messages-background">
 
-                  {messages.map((message) => {
+                  {messages.length ===
+                    0 && (
 
-                    const isInbound =
-                      message.direction ===
-                      'inbound';
+                    <div className="no-messages">
 
-                    return (
+                      <div>
+                        🔒
+                      </div>
 
-                      <div
-                        key={message.id}
-                        className={`message-row ${
-                          isInbound
-                            ? 'received'
-                            : 'sent'
-                        }`}
-                      >
+                      <strong>
+                        Nenhuma mensagem
+                      </strong>
+
+                      <span>
+                        Esta conversa ainda
+                        não possui mensagens.
+                      </span>
+
+                    </div>
+
+                  )}
+
+                  {messages.map(
+                    (message, index) => {
+
+                      if (!message) {
+                        return null;
+                      }
+
+                      const isInbound =
+                        safeText(
+                          message.direction
+                        ) ===
+                        'inbound';
+
+                      const mediaUrl =
+                        safeText(
+                          message.media_url
+                        );
+
+                      const mediaMime =
+                        getMediaType(
+                          message
+                        );
+
+                      const body =
+                        safeText(
+                          message.body
+                        );
+
+                      const hasImage =
+                        mediaUrl &&
+                        mediaMime.startsWith(
+                          'image/'
+                        );
+
+                      const hasAudio =
+                        mediaUrl &&
+                        mediaMime.startsWith(
+                          'audio/'
+                        );
+
+                      const hasVideo =
+                        mediaUrl &&
+                        mediaMime.startsWith(
+                          'video/'
+                        );
+
+                      const hasDocument =
+                        mediaUrl &&
+                        (
+                          mediaMime.startsWith(
+                            'application/'
+                          ) ||
+                          mediaMime.includes(
+                            'pdf'
+                          )
+                        );
+
+                      return (
 
                         <div
-                          className={`message-bubble ${
+                          key={
+                            message.id ??
+                            `message-${index}`
+                          }
+                          className={`message-row ${
                             isInbound
-                              ? 'received-bubble'
-                              : 'sent-bubble'
+                              ? 'received'
+                              : 'sent'
                           }`}
                         >
 
-                          {/* IMAGEM */}
+                          <div
+                            className={`message-bubble ${
+                              isInbound
+                                ? 'received-bubble'
+                                : 'sent-bubble'
+                            }`}
+                          >
 
-                          {message.media_url &&
-                          message.media_mime?.startsWith(
-                            'image'
-                          ) ? (
+                            {/* IMAGEM */}
 
-                            <img
-                              src={
-                                message.media_url
-                              }
-                              alt="Imagem"
-                              className="message-image"
-                              onClick={() =>
-                                window.open(
-                                  message.media_url,
-                                  '_blank'
-                                )
-                              }
-                            />
+                            {hasImage && (
 
-                          ) : null}
+                              <img
+                                src={mediaUrl}
+                                alt="Imagem recebida"
+                                className="message-image"
+                                onClick={() =>
+                                  window.open(
+                                    mediaUrl,
+                                    '_blank'
+                                  )
+                                }
+                              />
 
-                          {/* ÁUDIO */}
+                            )}
 
-                          {message.media_url &&
-                          message.media_mime?.startsWith(
-                            'audio'
-                          ) ? (
+                            {/* ÁUDIO */}
 
-                            <audio
-                              controls
-                              src={
-                                message.media_url
-                              }
-                              className="message-audio"
-                            />
+                            {hasAudio && (
 
-                          ) : null}
+                              <audio
+                                controls
+                                src={mediaUrl}
+                                className="message-audio"
+                              />
 
-                          {/* VÍDEO */}
+                            )}
 
-                          {message.media_url &&
-                          message.media_mime?.startsWith(
-                            'video'
-                          ) ? (
+                            {/* VÍDEO */}
 
-                            <video
-                              controls
-                              src={
-                                message.media_url
-                              }
-                              className="message-video"
-                            />
+                            {hasVideo && (
 
-                          ) : null}
+                              <video
+                                controls
+                                src={mediaUrl}
+                                className="message-video"
+                              />
 
-                          {/* DOCUMENTO */}
+                            )}
 
-                          {message.media_url &&
-                          message.media_mime?.startsWith(
-                            'application'
-                          ) ? (
+                            {/* DOCUMENTO */}
 
-                            <a
-                              href={
-                                message.media_url
-                              }
-                              target="_blank"
-                              rel="noreferrer"
-                              className="document-message"
-                            >
-                              📄
-                              <span>
-                                Abrir documento
-                              </span>
-                            </a>
+                            {hasDocument && (
 
-                          ) : null}
-
-                          {/* TEXTO */}
-
-                          {message.body &&
-                          !(
-                            message.media_url &&
-                            (
-                              message.media_mime?.startsWith(
-                                'image'
-                              ) ||
-                              message.media_mime?.startsWith(
-                                'audio'
-                              ) ||
-                              message.media_mime?.startsWith(
-                                'video'
-                              ) ||
-                              message.media_mime?.startsWith(
-                                'application'
-                              )
-                            )
-                          ) ? (
-
-                            <div className="message-text">
-                              {message.body}
-                            </div>
-
-                          ) : null}
-
-                          <div className="message-meta">
-
-                            <span>
-                              {formatTime(
-                                message.created_at
-                              )}
-                            </span>
-
-                            {!isInbound && (
-
-                              <span
-                                className={`message-status ${
-                                  message.status ===
-                                    'read' ||
-                                  message.status ===
-                                    'lido'
-                                    ? 'read'
-                                    : ''
-                                }`}
+                              <a
+                                href={mediaUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="document-message"
                               >
-                                {getStatusIcon(
-                                  message.status
+                                📄
+
+                                <span>
+                                  Abrir documento
+                                </span>
+
+                              </a>
+
+                            )}
+
+                            {/* TEXTO */}
+
+                            {body && (
+
+                              <div className="message-text">
+                                {body}
+                              </div>
+
+                            )}
+
+                            <div className="message-meta">
+
+                              <span>
+                                {formatTime(
+                                  message.created_at
                                 )}
                               </span>
 
-                            )}
+                              {!isInbound && (
+
+                                <span
+                                  className={`message-status ${
+                                    safeText(
+                                      message.status
+                                    ).toLowerCase() ===
+                                      'read' ||
+                                    safeText(
+                                      message.status
+                                    ).toLowerCase() ===
+                                      'lido'
+                                      ? 'read'
+                                      : ''
+                                  }`}
+                                >
+                                  {getStatusIcon(
+                                    message.status
+                                  )}
+                                </span>
+
+                              )}
+
+                            </div>
 
                           </div>
 
                         </div>
 
-                      </div>
-
-                    );
-                  })}
+                      );
+                    }
+                  )}
 
                   <div
-                    ref={messagesEndRef}
+                    ref={
+                      messagesEndRef
+                    }
                   />
 
                 </div>
@@ -806,8 +1187,6 @@ useEffect(() => {
               {/* COMPOSER */}
 
               <footer className="composer">
-
-                {/* EMOJI */}
 
                 {showEmoji && (
 
@@ -845,32 +1224,25 @@ useEffect(() => {
                   title="Emoji"
                   onClick={() =>
                     setShowEmoji(
-                      (prev) => !prev
+                      (prev) =>
+                        !prev
                     )
                   }
                 >
                   😊
                 </button>
 
-                <button
-                  type="button"
-                  className="composer-button"
-                  title="Anexar arquivo"
-                  onClick={() =>
-                    imageInputRef.current?.click()
-                  }
-                  disabled={sending}
-                >
-                  📎
-                </button>
-
                 <textarea
                   ref={inputRef}
                   value={draft}
                   onChange={(e) =>
-                    setDraft(e.target.value)
+                    setDraft(
+                      e.target.value
+                    )
                   }
-                  onKeyDown={handleKeyDown}
+                  onKeyDown={
+                    handleKeyDown
+                  }
                   placeholder="Digite uma mensagem"
                   rows={1}
                   disabled={sending}
@@ -888,22 +1260,17 @@ useEffect(() => {
                   }}
                 />
 
-                <input
-                  type="file"
-                  accept="image/*"
-                  ref={imageInputRef}
-                  style={{
-                    display: 'none',
-                  }}
-                />
-
                 {draft.trim() ? (
 
                   <button
                     type="button"
                     className="send-button"
-                    onClick={handleSend}
-                    disabled={sending}
+                    onClick={
+                      handleSend
+                    }
+                    disabled={
+                      sending
+                    }
                   >
                     {sending
                       ? '...'
@@ -919,7 +1286,9 @@ useEffect(() => {
                     onClick={() =>
                       audioInputRef.current?.click()
                     }
-                    disabled={sending}
+                    disabled={
+                      sending
+                    }
                   >
                     🎙️
                   </button>
@@ -936,9 +1305,9 @@ useEffect(() => {
 
       </div>
 
-      {/* ========================================================
-          ESTILOS
-      ======================================================== */}
+      {/* =====================================================
+          CSS
+      ===================================================== */}
 
       <style jsx>{`
 
@@ -964,14 +1333,14 @@ useEffect(() => {
             sans-serif;
         }
 
-        /* =====================================================
-           SIDEBAR
-        ===================================================== */
+        /* ================================
+           MENU
+        ================================= */
 
         .main-sidebar {
           display: flex;
           flex-direction: column;
-          background: #111827;
+          background: #0b5ed7;
           color: white;
           padding: 20px 14px;
         }
@@ -990,7 +1359,8 @@ useEffect(() => {
           display: flex;
           align-items: center;
           justify-content: center;
-          background: #2563eb;
+          background: white;
+          color: #0b5ed7;
           font-size: 20px;
         }
 
@@ -1001,7 +1371,7 @@ useEffect(() => {
 
         .brand-subtitle {
           font-size: 11px;
-          color: #9ca3af;
+          color: rgba(255,255,255,.75);
           margin-top: 2px;
         }
 
@@ -1011,26 +1381,30 @@ useEffect(() => {
           gap: 5px;
         }
 
-        .menu-item {
+        .menu-item,
+        .menu-item:visited,
+        .menu-item:active {
           display: flex;
           align-items: center;
           gap: 12px;
           padding: 12px;
           border-radius: 9px;
-          color: #d1d5db;
+          color: #ffd400;
           text-decoration: none;
           font-size: 13px;
-          transition: 0.2s;
+          font-weight: 600;
+          transition: .2s;
         }
 
         .menu-item:hover {
-          background: #1f2937;
-          color: white;
+          background: rgba(255,255,255,.12);
+          color: #fff;
         }
 
-        .menu-item.active {
-          background: #2563eb;
-          color: white;
+        .menu-item.active,
+        .menu-item.active:visited {
+          background: rgba(255,255,255,.15);
+          color: #ffd400;
         }
 
         .sidebar-bottom {
@@ -1043,15 +1417,15 @@ useEffect(() => {
           gap: 10px;
           padding: 12px;
           border-radius: 10px;
-          background: #1f2937;
+          background: rgba(0,0,0,.12);
         }
 
         .online-dot {
           width: 9px;
           height: 9px;
+          flex: 0 0 auto;
           background: #22c55e;
           border-radius: 50%;
-          box-shadow: 0 0 0 3px rgba(34,197,94,.12);
         }
 
         .connection-status strong {
@@ -1062,13 +1436,13 @@ useEffect(() => {
         .connection-status small {
           display: block;
           margin-top: 2px;
-          color: #9ca3af;
+          color: rgba(255,255,255,.7);
           font-size: 10px;
         }
 
-        /* =====================================================
-           CONVERSAS
-        ===================================================== */
+        /* ================================
+           LISTA
+        ================================= */
 
         .conversation-panel {
           display: flex;
@@ -1086,6 +1460,7 @@ useEffect(() => {
           margin: 0;
           font-size: 20px;
           font-weight: 700;
+          color: #111827;
         }
 
         .conversation-header span {
@@ -1104,10 +1479,6 @@ useEffect(() => {
           height: 40px;
           background: #f3f4f6;
           border-radius: 9px;
-        }
-
-        .search-icon {
-          font-size: 14px;
         }
 
         .search-box input {
@@ -1136,6 +1507,7 @@ useEffect(() => {
           text-align: left;
           cursor: pointer;
           transition: background .15s;
+          color: #111827;
         }
 
         .conversation-item:hover {
@@ -1171,8 +1543,7 @@ useEffect(() => {
           flex: 1;
         }
 
-        .conversation-top,
-        .conversation-bottom {
+        .conversation-top {
           display: flex;
           justify-content: space-between;
           align-items: center;
@@ -1185,6 +1556,8 @@ useEffect(() => {
           text-overflow: ellipsis;
           white-space: nowrap;
           font-size: 13px;
+          color: #111827;
+          font-weight: 600;
         }
 
         .conversation-top span {
@@ -1230,9 +1603,9 @@ useEffect(() => {
           font-size: 12px;
         }
 
-        /* =====================================================
+        /* ================================
            CHAT
-        ===================================================== */
+        ================================= */
 
         .chat {
           min-width: 0;
@@ -1264,6 +1637,7 @@ useEffect(() => {
         .chat-contact strong {
           display: block;
           font-size: 14px;
+          color: #111827;
         }
 
         .chat-contact span {
@@ -1304,7 +1678,7 @@ useEffect(() => {
           background-color: #efeae2;
           background-image:
             radial-gradient(
-              rgba(120, 113, 108, .08) 1px,
+              rgba(120,113,108,.08) 1px,
               transparent 1px
             );
           background-size: 18px 18px;
@@ -1347,6 +1721,7 @@ useEffect(() => {
           font-size: 14px;
           line-height: 1.45;
           padding-right: 35px;
+          color: #111827;
         }
 
         .message-meta {
@@ -1402,9 +1777,40 @@ useEffect(() => {
           font-size: 13px;
         }
 
-        /* =====================================================
+        .no-messages {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          width: fit-content;
+          max-width: 280px;
+          margin: 80px auto;
+          padding: 16px 22px;
+          border-radius: 10px;
+          background: rgba(255,255,255,.85);
+          text-align: center;
+          color: #6b7280;
+          box-shadow: 0 1px 2px rgba(0,0,0,.05);
+        }
+
+        .no-messages > div {
+          font-size: 25px;
+          margin-bottom: 8px;
+        }
+
+        .no-messages strong {
+          color: #374151;
+          font-size: 13px;
+        }
+
+        .no-messages span {
+          margin-top: 5px;
+          font-size: 11px;
+        }
+
+        /* ================================
            COMPOSER
-        ===================================================== */
+        ================================= */
 
         .composer {
           position: relative;
@@ -1457,13 +1863,13 @@ useEffect(() => {
         }
 
         .send-button {
-          background: #2563eb;
+          background: #0b5ed7;
           color: white;
           font-size: 18px;
         }
 
         .send-button:hover {
-          background: #1d4ed8;
+          background: #084db2;
         }
 
         .composer-button:disabled,
@@ -1472,9 +1878,9 @@ useEffect(() => {
           cursor: not-allowed;
         }
 
-        /* =====================================================
-           EMOJI
-        ===================================================== */
+        /* ================================
+           EMOJIS
+        ================================= */
 
         .emoji-picker {
           position: absolute;
@@ -1484,8 +1890,7 @@ useEffect(() => {
           padding: 12px;
           border-radius: 12px;
           background: white;
-          box-shadow:
-            0 10px 35px rgba(0,0,0,.18);
+          box-shadow: 0 10px 35px rgba(0,0,0,.18);
           z-index: 20;
         }
 
@@ -1509,9 +1914,9 @@ useEffect(() => {
           background: #f3f4f6;
         }
 
-        /* =====================================================
-           EMPTY CHAT
-        ===================================================== */
+        /* ================================
+           TELA INICIAL
+        ================================= */
 
         .empty-chat {
           flex: 1;
@@ -1548,14 +1953,17 @@ useEffect(() => {
           line-height: 1.5;
         }
 
-        /* =====================================================
+        /* ================================
            RESPONSIVO
-        ===================================================== */
+        ================================= */
 
         @media (max-width: 1000px) {
 
           .crm-app {
-            grid-template-columns: 75px 320px minmax(0, 1fr);
+            grid-template-columns:
+              75px
+              320px
+              minmax(0, 1fr);
           }
 
           .brand {
