@@ -4,6 +4,7 @@ import Link from 'next/link';
 export default function Inbox() {
   const [contacts, setContacts] = useState([]);
   const [selected, setSelected] = useState(null);
+  const [selectedContactId, setSelectedContactId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -36,21 +37,26 @@ export default function Inbox() {
   // MENSAGENS
   // ============================================================
 
-  async function loadMessages(contactId) {
-    try {
-      const res = await fetch(
-        `/api/messages?contact_id=${contactId}`
-      );
+async function loadMessages(contactId) {
+  try {
+    const res = await fetch(
+      `/api/messages?contact_id=${encodeURIComponent(contactId)}`
+    );
 
-      const data = await res.json();
+    const data = await res.json();
 
-      if (Array.isArray(data)) {
-        setMessages(data);
-      }
-    } catch (error) {
-      console.error('Erro ao carregar mensagens:', error);
+    if (!res.ok) {
+      console.error('Erro da API de mensagens:', data);
+      setMessages([]);
+      return;
     }
+
+    setMessages(Array.isArray(data) ? data : []);
+  } catch (error) {
+    console.error('Erro ao carregar mensagens:', error);
+    setMessages([]);
   }
+}
 
   // ============================================================
   // CARREGA CONTATOS
@@ -70,20 +76,20 @@ export default function Inbox() {
   // CARREGA CONVERSA
   // ============================================================
 
-  useEffect(() => {
-    if (!selected) {
-      setMessages([]);
-      return;
-    }
+useEffect(() => {
+  if (!selectedContactId) {
+    setMessages([]);
+    return;
+  }
 
-    loadMessages(selected.id);
+  loadMessages(selectedContactId);
 
-    const interval = setInterval(() => {
-      loadMessages(selected.id);
-    }, 5000);
+  const interval = setInterval(() => {
+    loadMessages(selectedContactId);
+  }, 5000);
 
-    return () => clearInterval(interval);
-  }, [selected]);
+  return () => clearInterval(interval);
+}, [selectedContactId]);
 
   // ============================================================
   // SCROLL AUTOMÁTICO
@@ -474,6 +480,7 @@ export default function Inbox() {
                     : ''
                 }`}
                 onClick={() => {
+                  setSelectedContactId(contact.id);
                   setSelected(contact);
                   setShowEmoji(false);
                 }}
