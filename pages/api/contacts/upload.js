@@ -14,7 +14,8 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Erro ao ler CSV', details: parsed.errors });
   }
 
-  const results = { created: 0, failed: [] };
+  const results = { created: 0, duplicates: 0, failed: [] };
+  const seenInFile = new Set();
 
   for (const row of parsed.data) {
     const name = row.nome || row.name || row.Nome || row.Name;
@@ -24,9 +25,21 @@ export default async function handler(req, res) {
       results.failed.push({ row, reason: 'sem telefone' });
       continue;
     }
+
+    const cleanPhone = String(phone).replace(/\D/g, '');
+
     try {
-      await getOrCreateContact({ name, phone });
-      results.created++;
+      const contact = await getOrCreateContact({ name, phone });
+
+      // Duplicado dentro do próprio arquivo (mesmo telefone repetido no CSV)
+      // ou já existente no banco de antes.
+      if (contact._duplicate || seenInFile.has(cleanPhone)) {
+        results.duplicates++;
+      } else {
+        results.created++;
+      }
+
+      seenInFile.add(cleanPhone);
     } catch (err) {
       results.failed.push({ row, reason: err.message });
     }

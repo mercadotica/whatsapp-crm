@@ -10,6 +10,8 @@ export default function Inbox() {
   const [sending, setSending] = useState(false);
   const [search, setSearch] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
+  const [contactsLoadState, setContactsLoadState] = useState('loading'); // loading | ready | error
+  const [messagesLoadState, setMessagesLoadState] = useState('idle'); // idle | loading | ready | error
 
   const audioInputRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -65,6 +67,7 @@ export default function Inbox() {
           'Erro ao carregar contatos:',
           data
         );
+        setContactsLoadState('error');
         return;
       }
 
@@ -73,15 +76,18 @@ export default function Inbox() {
           'Resposta inválida de /api/contacts:',
           data
         );
+        setContactsLoadState('error');
         return;
       }
 
       setContacts(data);
+      setContactsLoadState('ready');
     } catch (error) {
       console.error(
         'Erro ao carregar contatos:',
         error
       );
+      setContactsLoadState('error');
     }
   }
 
@@ -96,8 +102,11 @@ export default function Inbox() {
       contactId === ''
     ) {
       setMessages([]);
+      setMessagesLoadState('idle');
       return;
     }
+
+    setMessagesLoadState((prev) => (prev === 'ready' ? prev : 'loading'));
 
     try {
       const res = await fetch(
@@ -115,6 +124,7 @@ export default function Inbox() {
         );
 
         setMessages([]);
+        setMessagesLoadState('error');
         return;
       }
 
@@ -125,10 +135,12 @@ export default function Inbox() {
         );
 
         setMessages([]);
+        setMessagesLoadState('error');
         return;
       }
 
       setMessages(data);
+      setMessagesLoadState('ready');
     } catch (error) {
       console.error(
         'Erro ao carregar mensagens:',
@@ -136,6 +148,7 @@ export default function Inbox() {
       );
 
       setMessages([]);
+      setMessagesLoadState('error');
     }
   }
 
@@ -217,6 +230,7 @@ export default function Inbox() {
     setSelected(contact);
     setSelectedContactId(id);
     setMessages([]);
+    setMessagesLoadState('loading');
     setDraft('');
     setShowEmoji(false);
   }
@@ -574,7 +588,7 @@ export default function Inbox() {
 
   function getLastMessage(contact) {
     if (!contact) {
-      return '';
+      return 'Nenhuma mensagem';
     }
 
     const last =
@@ -582,14 +596,23 @@ export default function Inbox() {
       contact.lastMessage;
 
     if (
-      last !== null &&
-      last !== undefined &&
-      last !== ''
+      last === null ||
+      last === undefined ||
+      last === ''
     ) {
-      return safeText(last);
+      return 'Nenhuma mensagem';
     }
 
-    return 'Nenhuma mensagem';
+    const text = safeText(last);
+
+    const isOutbound =
+      safeText(
+        contact.last_message_direction
+      ) === 'outbound';
+
+    return isOutbound
+      ? `Você: ${text}`
+      : text;
   }
 
   // ============================================================
@@ -757,7 +780,51 @@ export default function Inbox() {
 
           <div className="conversation-list">
 
-            {filteredContacts.map(
+            {contactsLoadState === 'loading' && (
+
+              <div className="empty-conversations">
+
+                <div className="empty-icon">
+                  ⏳
+                </div>
+
+                <strong>
+                  Carregando conversas...
+                </strong>
+
+              </div>
+
+            )}
+
+            {contactsLoadState === 'error' && (
+
+              <div className="empty-conversations">
+
+                <div className="empty-icon">
+                  ⚠️
+                </div>
+
+                <strong>
+                  Erro ao carregar conversas
+                </strong>
+
+                <span>
+                  Verifique sua conexão e tente novamente.
+                </span>
+
+                <button
+                  type="button"
+                  onClick={loadContacts}
+                  style={{ marginTop: 10 }}
+                >
+                  Tentar de novo
+                </button>
+
+              </div>
+
+            )}
+
+            {contactsLoadState === 'ready' && filteredContacts.map(
               (contact, index) => {
 
                 if (!contact) {
@@ -819,7 +886,7 @@ export default function Inbox() {
 
                         <span>
                           {formatDate(
-                            contact.updated_at ||
+                            contact.last_message_at ||
                               contact.created_at
                           )}
                         </span>
@@ -843,8 +910,8 @@ export default function Inbox() {
               }
             )}
 
-            {filteredContacts.length ===
-              0 && (
+            {contactsLoadState === 'ready' &&
+              filteredContacts.length === 0 && (
 
               <div className="empty-conversations">
 
@@ -853,13 +920,15 @@ export default function Inbox() {
                 </div>
 
                 <strong>
-                  Nenhuma conversa
+                  {search
+                    ? 'Nenhum resultado'
+                    : 'Nenhuma conversa'}
                 </strong>
 
                 <span>
-                  Quando alguém enviar
-                  uma mensagem, ela
-                  aparecerá aqui.
+                  {search
+                    ? 'Tente pesquisar por outro nome ou telefone.'
+                    : 'Quando alguém enviar uma mensagem, ela aparecerá aqui.'}
                 </span>
 
               </div>
@@ -960,8 +1029,34 @@ export default function Inbox() {
 
                 <div className="messages-background">
 
-                  {messages.length ===
-                    0 && (
+                  {messagesLoadState === 'loading' && (
+
+                    <div className="no-messages">
+                      <div>⏳</div>
+                      <strong>Carregando mensagens...</strong>
+                    </div>
+
+                  )}
+
+                  {messagesLoadState === 'error' && (
+
+                    <div className="no-messages">
+                      <div>⚠️</div>
+                      <strong>Erro ao carregar mensagens</strong>
+                      <span>Verifique sua conexão.</span>
+                      <button
+                        type="button"
+                        onClick={() => loadMessages(selectedContactId)}
+                        style={{ marginTop: 10 }}
+                      >
+                        Tentar de novo
+                      </button>
+                    </div>
+
+                  )}
+
+                  {messagesLoadState === 'ready' &&
+                    messages.length === 0 && (
 
                     <div className="no-messages">
 
@@ -982,7 +1077,7 @@ export default function Inbox() {
 
                   )}
 
-                  {messages.map(
+                  {messagesLoadState === 'ready' && messages.map(
                     (message, index) => {
 
                       if (!message) {
