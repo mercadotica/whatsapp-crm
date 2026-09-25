@@ -56,6 +56,39 @@ export default function Inbox() {
   // CONTATOS
   // ============================================================
 
+  const hasLoadedContactsRef = useRef(false);
+
+  // Mantém a ORDEM da lista estável entre os polls (a cada 8s).
+  // Sem isso, a lista inteira reordenava toda vez que qualquer contato
+  // recebia mensagem nova, e um clique podia "errar o alvo" bem na hora
+  // em que o item embaixo do cursor mudava de lugar — o clique simplesmente
+  // não registrava em nada (parecia que a tela "não abria a conversa").
+  function mergeContactsPreservingOrder(prevList, nextList) {
+    const nextById = new Map(
+      nextList.map((c) => [safeId(c.id), c])
+    );
+    const seen = new Set();
+    const merged = [];
+
+    for (const prevContact of prevList) {
+      const id = safeId(prevContact.id);
+      const updated = nextById.get(id);
+      if (updated) {
+        merged.push(updated);
+        seen.add(id);
+      }
+      // se não existe mais em `nextList`, o contato foi removido -> descarta
+    }
+
+    // Contatos novos desde o último poll entram no topo (é onde ficariam
+    // de qualquer forma, por serem os mais recentes).
+    const newOnes = nextList.filter(
+      (c) => !seen.has(safeId(c.id))
+    );
+
+    return [...newOnes, ...merged];
+  }
+
   async function loadContacts() {
     try {
       const res = await fetch('/api/contacts');
@@ -67,7 +100,9 @@ export default function Inbox() {
           'Erro ao carregar contatos:',
           data
         );
-        setContactsLoadState('error');
+        if (!hasLoadedContactsRef.current) {
+          setContactsLoadState('error');
+        }
         return;
       }
 
@@ -76,18 +111,28 @@ export default function Inbox() {
           'Resposta inválida de /api/contacts:',
           data
         );
-        setContactsLoadState('error');
+        if (!hasLoadedContactsRef.current) {
+          setContactsLoadState('error');
+        }
         return;
       }
 
-      setContacts(data);
+      setContacts((prev) =>
+        mergeContactsPreservingOrder(prev, data)
+      );
       setContactsLoadState('ready');
+      hasLoadedContactsRef.current = true;
     } catch (error) {
       console.error(
         'Erro ao carregar contatos:',
         error
       );
-      setContactsLoadState('error');
+      // Se já tínhamos uma lista carregada, um erro passageiro no poll em
+      // segundo plano não deve derrubar a tela inteira pra um estado de
+      // erro — mantém o que já estava na tela.
+      if (!hasLoadedContactsRef.current) {
+        setContactsLoadState('error');
+      }
     }
   }
 
