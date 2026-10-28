@@ -155,6 +155,23 @@ function formatDate(value) {
   });
 }
 
+function formatDateTime(value) {
+  if (!value) return '—';
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return '—';
+
+  return date.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
 function getTemplateBody(template) {
   if (!template?.components) return '';
 
@@ -166,13 +183,16 @@ function getTemplateBody(template) {
 }
 
 function getVariableNumbers(text) {
-  const matches = String(text || '').match(/{{\s*(\d+)\s*}}/g) || [];
+  const matches =
+    String(text || '').match(/{{\s*(\d+)\s*}}/g) || [];
 
-  return [...new Set(
-    matches.map((match) =>
-      Number(match.replace(/[{}]/g, '').trim())
-    )
-  )].sort((a, b) => a - b);
+  return [
+    ...new Set(
+      matches.map((match) =>
+        Number(match.replace(/[{}]/g, '').trim())
+      )
+    ),
+  ].sort((a, b) => a - b);
 }
 
 function formatTemplatePreview(text, mappings) {
@@ -205,7 +225,6 @@ function formatTemplatePreview(text, mappings) {
 export default function ContactsPage() {
   const [contacts, setContacts] = useState([]);
   const [templates, setTemplates] = useState([]);
-
   const [selectedIds, setSelectedIds] = useState(new Set());
 
   const [search, setSearch] = useState('');
@@ -222,12 +241,13 @@ export default function ContactsPage() {
 
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [mappings, setMappings] = useState({});
-
   const [campaignName, setCampaignName] = useState('');
 
   const [processing, setProcessing] = useState(false);
   const [campaign, setCampaign] = useState(null);
   const [campaignError, setCampaignError] = useState('');
+  const [sentNumbers, setSentNumbers] = useState([]);
+  const [failedNumbers, setFailedNumbers] = useState([]);
 
   async function loadContacts() {
     try {
@@ -242,7 +262,7 @@ export default function ContactsPage() {
 
       setContacts(Array.isArray(data) ? data : []);
     } catch (error) {
-      console.error(error);
+      console.error('Erro ao carregar contatos:', error);
     } finally {
       setLoadingContacts(false);
     }
@@ -253,41 +273,44 @@ export default function ContactsPage() {
       setLoadingTemplates(true);
       setTemplatesError('');
 
-      // `_t` + no-store garantem que SEMPRE busca da Meta, nunca de cache
       const response = await fetch(
         `/api/whatsapp/templates?_t=${Date.now()}`,
         { cache: 'no-store' }
       );
+
       const data = await response.json();
 
       if (!response.ok) {
         throw new Error(data.error || 'Erro ao carregar templates');
       }
 
-      const list = data.templates || [];
+      const list = Array.isArray(data.templates)
+        ? data.templates
+        : [];
+
       setTemplates(list);
 
-      // Se o template selecionado deixou de existir/aprovado, desmarca
       setSelectedTemplate((current) =>
         current &&
         list.some(
-          (t) =>
-            t.name === current.name && t.language === current.language
+          (template) =>
+            template.name === current.name &&
+            template.language === current.language
         )
           ? current
           : null
       );
     } catch (error) {
-      console.error(error);
+      console.error('Erro ao carregar templates:', error);
       setTemplates([]);
-      setTemplatesError(error.message || 'Erro ao carregar templates');
+      setTemplatesError(
+        error.message || 'Erro ao carregar templates'
+      );
     } finally {
       setLoadingTemplates(false);
     }
   }
 
-  // Carrega ao abrir a página e recarrega sempre que a aba voltar a ficar
-  // visível / ganhar foco (ou seja, toda vez que o usuário "acessar" de novo)
   useEffect(() => {
     loadContacts();
     loadTemplates();
@@ -302,7 +325,10 @@ export default function ContactsPage() {
     window.addEventListener('focus', loadTemplates);
 
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibility);
+      document.removeEventListener(
+        'visibilitychange',
+        handleVisibility
+      );
       window.removeEventListener('focus', loadTemplates);
     };
   }, []);
@@ -310,24 +336,15 @@ export default function ContactsPage() {
   const filteredContacts = useMemo(() => {
     const term = search.trim().toLowerCase();
 
-    if (!term) {
-      return contacts;
-    }
+    if (!term) return contacts;
 
-    return contacts.filter((contact) => {
-      return (
-        String(contact.name || '')
-          .toLowerCase()
-          .includes(term) ||
-        String(contact.phone || '')
-          .toLowerCase()
-          .includes(term)
-      );
-    });
+    return contacts.filter((contact) =>
+      String(contact.name || '').toLowerCase().includes(term) ||
+      String(contact.phone || '').toLowerCase().includes(term)
+    );
   }, [contacts, search]);
 
   const selectedCount = selectedIds.size;
-
   const selectedTemplateBody = getTemplateBody(selectedTemplate);
 
   const templateVariables = getVariableNumbers(
@@ -382,6 +399,13 @@ export default function ContactsPage() {
       setCsvText(String(loadEvent.target?.result || ''));
     };
 
+    reader.onerror = () => {
+      setImportResult({
+        type: 'error',
+        message: 'Não foi possível ler o arquivo CSV.',
+      });
+    };
+
     reader.readAsText(file, 'UTF-8');
   }
 
@@ -389,7 +413,8 @@ export default function ContactsPage() {
     if (!csvText.trim()) {
       setImportResult({
         type: 'error',
-        message: 'Selecione um arquivo CSV ou cole o conteúdo da lista.',
+        message:
+          'Selecione um arquivo CSV ou cole o conteúdo da lista.',
       });
       return;
     }
@@ -403,9 +428,7 @@ export default function ContactsPage() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          csvText,
-        }),
+        body: JSON.stringify({ csvText }),
       });
 
       const data = await response.json();
@@ -430,7 +453,7 @@ export default function ContactsPage() {
     } catch (error) {
       setImportResult({
         type: 'error',
-        message: error.message,
+        message: error.message || 'Erro ao importar lista.',
       });
     } finally {
       setImporting(false);
@@ -440,8 +463,9 @@ export default function ContactsPage() {
   function selectTemplate(template) {
     setSelectedTemplate(template);
 
-    const body = getTemplateBody(template);
-    const variables = getVariableNumbers(body);
+    const variables = getVariableNumbers(
+      getTemplateBody(template)
+    );
 
     const initialMappings = {};
 
@@ -466,9 +490,7 @@ export default function ContactsPage() {
   }
 
   function buildTemplateComponents() {
-    if (!templateVariables.length) {
-      return [];
-    }
+    if (!templateVariables.length) return [];
 
     return [
       {
@@ -504,6 +526,21 @@ export default function ContactsPage() {
         );
       }
 
+      // Acumula os resultados de todos os lotes desta sessão.
+      if (Array.isArray(data.sent_numbers)) {
+        setSentNumbers((current) => [
+          ...current,
+          ...data.sent_numbers,
+        ]);
+      }
+
+      if (Array.isArray(data.failed_numbers)) {
+        setFailedNumbers((current) => [
+          ...current,
+          ...data.failed_numbers,
+        ]);
+      }
+
       setCampaign((current) => ({
         ...(current || {}),
         ...data,
@@ -530,8 +567,14 @@ export default function ContactsPage() {
       return;
     }
 
+    // Evita iniciar outra campanha enquanto uma estiver processando.
+    if (processing) return;
+
     try {
       setProcessing(true);
+      setSentNumbers([]);
+      setFailedNumbers([]);
+      setCampaign(null);
 
       const response = await fetch('/api/send/bulk-start', {
         method: 'POST',
@@ -559,21 +602,94 @@ export default function ContactsPage() {
 
       await runBatches(data.id);
     } catch (error) {
-      setCampaignError(error.message);
+      setCampaignError(
+        error.message || 'Erro ao processar a campanha.'
+      );
     } finally {
       setProcessing(false);
     }
   }
 
+  function downloadCampaignReport(rows, filename) {
+    if (!rows.length) {
+      setCampaignError(
+        'Não há registros para exportar nesta lista.'
+      );
+      return;
+    }
+
+    const columns = [
+      ['name', 'Nome'],
+      ['phone', 'Telefone'],
+      ['status', 'Status'],
+      ['message', 'Template'],
+      ['sent_at', 'Data do envio'],
+      ['failed_at', 'Data da falha'],
+      ['message_id', 'ID da mensagem'],
+      ['error', 'Motivo da falha'],
+    ];
+
+    const escapeCsv = (value) => {
+      let text = value == null ? '' : String(value);
+
+      // Evita que o Excel interprete os dados como fórmulas.
+      if (/^[=+@\-]/.test(text)) {
+        text = `'${text}`;
+      }
+
+      return `"${text.replace(/"/g, '""')}"`;
+    };
+
+    const csv = [
+      columns
+        .map(([, label]) => escapeCsv(label))
+        .join(';'),
+
+      ...rows.map((row) =>
+        columns
+          .map(([key]) => {
+            const value =
+              key === 'sent_at' || key === 'failed_at'
+                ? formatDateTime(row[key])
+                : row[key];
+
+            return escapeCsv(value);
+          })
+          .join(';')
+      ),
+    ].join('\r\n');
+
+    // BOM e quebras de linha reais para compatibilidade com Excel.
+    const blob = new Blob(['\uFEFF', csv], {
+      type: 'text/csv;charset=utf-8;',
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+
+    link.href = url;
+    link.download = filename;
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    URL.revokeObjectURL(url);
+  }
+
+  const allReportRows = [
+    ...sentNumbers,
+    ...failedNumbers,
+  ];
+
   const campaignTotal = Number(
-    campaign?.total_contacts || selectedCount || 0
+    campaign?.total_contacts ?? selectedCount
   );
 
   const campaignSent = Number(campaign?.sent_total || 0);
   const campaignFailed = Number(campaign?.failed_total || 0);
 
-  const campaignProcessed =
-    campaignSent + campaignFailed;
+  const campaignProcessed = campaignSent + campaignFailed;
 
   const progress =
     campaignTotal > 0
@@ -590,23 +706,22 @@ export default function ContactsPage() {
       ? 'Concluída'
       : processing
         ? 'Em andamento'
-        : 'Pronta';
+        : campaign
+          ? 'Processamento interrompido'
+          : 'Pronta';
 
   return (
     <div className="contacts-layout">
       <aside className="contacts-sidebar">
         <div className="contacts-brand">
           <div className="contacts-brand-mark">M</div>
-
           <div>
             <strong>Mercadótica</strong>
             <span>WhatsApp CRM</span>
           </div>
         </div>
 
-        <div className="contacts-nav-label">
-          Workspace
-        </div>
+        <div className="contacts-nav-label">Workspace</div>
 
         <nav className="contacts-nav">
           <a href="/" className="contacts-nav-item">
@@ -640,9 +755,7 @@ export default function ContactsPage() {
             <div className="contacts-eyebrow">
               WhatsApp Business
             </div>
-
             <h1>Contatos & Disparos</h1>
-
             <p>
               Crie campanhas direcionadas usando seus templates aprovados.
             </p>
@@ -666,7 +779,6 @@ export default function ContactsPage() {
             <div className="stat-icon">
               <Icon name="users" size={19} />
             </div>
-
             <div>
               <span>Total de contatos</span>
               <strong>{contacts.length}</strong>
@@ -677,7 +789,6 @@ export default function ContactsPage() {
             <div className="stat-icon selected">
               <Icon name="check" size={19} />
             </div>
-
             <div>
               <span>Selecionados</span>
               <strong>{selectedCount}</strong>
@@ -688,7 +799,6 @@ export default function ContactsPage() {
             <div className="stat-icon">
               <Icon name="template" size={19} />
             </div>
-
             <div>
               <span>Templates aprovados</span>
               <strong>{templates.length}</strong>
@@ -699,7 +809,6 @@ export default function ContactsPage() {
             <div className="stat-icon">
               <Icon name="send" size={19} />
             </div>
-
             <div>
               <span>Status</span>
               <strong>{campaignStatus}</strong>
@@ -718,11 +827,7 @@ export default function ContactsPage() {
 
           <div className="step-line" />
 
-          <div
-            className={`step ${
-              selectedTemplate ? 'active' : ''
-            }`}
-          >
+          <div className={`step ${selectedTemplate ? 'active' : ''}`}>
             <span>02</span>
             <div>
               <strong>Template</strong>
@@ -732,11 +837,7 @@ export default function ContactsPage() {
 
           <div className="step-line" />
 
-          <div
-            className={`step ${
-              campaign ? 'active' : ''
-            }`}
-          >
+          <div className={`step ${campaign ? 'active' : ''}`}>
             <span>03</span>
             <div>
               <strong>Envio</strong>
@@ -748,12 +849,8 @@ export default function ContactsPage() {
         <section className="crm-card audience-card">
           <div className="card-header">
             <div>
-              <div className="card-kicker">
-                Etapa 01
-              </div>
-
+              <div className="card-kicker">Etapa 01</div>
               <h2>Defina o público</h2>
-
               <p>
                 Importe uma lista CSV para selecionar automaticamente
                 os contatos que receberão a campanha.
@@ -781,13 +878,8 @@ export default function ContactsPage() {
                 {fileName || 'Selecione um arquivo CSV'}
               </strong>
 
-              <span>
-                Colunas esperadas: nome e telefone
-              </span>
-
-              <small>
-                Clique para escolher o arquivo
-              </small>
+              <span>Colunas esperadas: nome e telefone</span>
+              <small>Clique para escolher o arquivo</small>
             </label>
 
             <div className="import-details">
@@ -797,9 +889,7 @@ export default function ContactsPage() {
 
               <textarea
                 value={csvText}
-                onChange={(event) =>
-                  setCsvText(event.target.value)
-                }
+                onChange={(event) => setCsvText(event.target.value)}
                 placeholder={
                   'nome,telefone\nMaria,5577999999999\nJoão,5577988888888'
                 }
@@ -818,27 +908,20 @@ export default function ContactsPage() {
                   onClick={importCsv}
                   disabled={importing || !csvText.trim()}
                 >
-                  {importing
-                    ? 'Importando...'
-                    : 'Importar lista'}
+                  {importing ? 'Importando...' : 'Importar lista'}
                 </button>
               </div>
             </div>
           </div>
 
           {importResult && (
-            <div
-              className={`import-result ${
-                importResult.type
-              }`}
-            >
+            <div className={`import-result ${importResult.type}`}>
               <div>
                 <strong>
                   {importResult.type === 'success'
                     ? 'Importação concluída'
                     : 'Não foi possível importar'}
                 </strong>
-
                 <span>{importResult.message}</span>
               </div>
 
@@ -855,12 +938,8 @@ export default function ContactsPage() {
         <section className="crm-card template-section">
           <div className="card-header">
             <div>
-              <div className="card-kicker">
-                Etapa 02
-              </div>
-
+              <div className="card-kicker">Etapa 02</div>
               <h2>Escolha o template</h2>
-
               <p>
                 Selecione um template aprovado pela Meta para realizar
                 o disparo.
@@ -880,7 +959,9 @@ export default function ContactsPage() {
           ) : templatesError ? (
             <div className="empty-state">
               <Icon name="template" size={28} />
-              <strong>Não foi possível carregar os templates</strong>
+              <strong>
+                Não foi possível carregar os templates
+              </strong>
               <span>{templatesError}</span>
               <button
                 type="button"
@@ -934,14 +1015,9 @@ export default function ContactsPage() {
                     </strong>
 
                     <div className="template-meta">
-                      <span>
-                        {template.language || 'pt_BR'}
-                      </span>
-
+                      <span>{template.language || 'pt_BR'}</span>
                       {template.category && (
-                        <span>
-                          {template.category}
-                        </span>
+                        <span>{template.category}</span>
                       )}
                     </div>
 
@@ -959,14 +1035,8 @@ export default function ContactsPage() {
           <section className="crm-card configuration-section">
             <div className="card-header">
               <div>
-                <div className="card-kicker">
-                  Configuração
-                </div>
-
-                <h2>
-                  {selectedTemplate.name}
-                </h2>
-
+                <div className="card-kicker">Configuração</div>
+                <h2>{selectedTemplate.name}</h2>
                 <p>
                   Configure as variáveis e veja como a mensagem será
                   apresentada.
@@ -991,10 +1061,7 @@ export default function ContactsPage() {
                 ) : (
                   <div className="variables-list">
                     {templateVariables.map((number) => (
-                      <div
-                        className="variable-row"
-                        key={number}
-                      >
+                      <div className="variable-row" key={number}>
                         <div className="variable-number">
                           {`{{${number}}}`}
                         </div>
@@ -1004,8 +1071,7 @@ export default function ContactsPage() {
                             Fonte
                             <select
                               value={
-                                mappings[number]?.source ||
-                                'static'
+                                mappings[number]?.source || 'static'
                               }
                               onChange={(event) =>
                                 updateMapping(
@@ -1018,11 +1084,9 @@ export default function ContactsPage() {
                               <option value="contact.name">
                                 Nome do contato
                               </option>
-
                               <option value="contact.phone">
                                 Telefone
                               </option>
-
                               <option value="static">
                                 Valor fixo
                               </option>
@@ -1034,9 +1098,7 @@ export default function ContactsPage() {
                               Valor
                               <input
                                 type="text"
-                                value={
-                                  mappings[number]?.value || ''
-                                }
+                                value={mappings[number]?.value || ''}
                                 onChange={(event) =>
                                   updateMapping(
                                     number,
@@ -1062,10 +1124,7 @@ export default function ContactsPage() {
 
                 <div className="whatsapp-preview">
                   <div className="preview-header">
-                    <div className="preview-avatar">
-                      M
-                    </div>
-
+                    <div className="preview-avatar">M</div>
                     <div>
                       <strong>Mercadótica</strong>
                       <span>Conta comercial</span>
@@ -1075,9 +1134,7 @@ export default function ContactsPage() {
                   <div className="preview-body">
                     <div className="message-bubble">
                       {previewText || selectedTemplateBody}
-                      <span className="message-time">
-                        10:42
-                      </span>
+                      <span className="message-time">10:42</span>
                     </div>
                   </div>
                 </div>
@@ -1089,12 +1146,8 @@ export default function ContactsPage() {
         <section className="crm-card campaign-card">
           <div className="card-header">
             <div>
-              <div className="card-kicker">
-                Etapa 03
-              </div>
-
+              <div className="card-kicker">Etapa 03</div>
               <h2>Preparar disparo</h2>
-
               <p>
                 Revise as informações antes de iniciar a campanha.
               </p>
@@ -1118,9 +1171,7 @@ export default function ContactsPage() {
           <div className="campaign-summary">
             <div>
               <span>Público</span>
-              <strong>
-                {selectedCount} contatos
-              </strong>
+              <strong>{selectedCount} contatos</strong>
             </div>
 
             <div>
@@ -1134,9 +1185,7 @@ export default function ContactsPage() {
 
             <div>
               <span>Idioma</span>
-              <strong>
-                {selectedTemplate?.language || '—'}
-              </strong>
+              <strong>{selectedTemplate?.language || '—'}</strong>
             </div>
 
             <button
@@ -1144,23 +1193,16 @@ export default function ContactsPage() {
               className="send-button"
               onClick={handleStartCampaign}
               disabled={
-                processing ||
-                !selectedCount ||
-                !selectedTemplate
+                processing || !selectedCount || !selectedTemplate
               }
             >
               <Icon name="send" size={17} />
-
-              {processing
-                ? 'Enviando...'
-                : 'Iniciar disparo'}
+              {processing ? 'Enviando...' : 'Iniciar disparo'}
             </button>
           </div>
 
           {campaignError && (
-            <div className="campaign-error">
-              {campaignError}
-            </div>
+            <div className="campaign-error">{campaignError}</div>
           )}
         </section>
 
@@ -1168,10 +1210,7 @@ export default function ContactsPage() {
           <section className="crm-card progress-card">
             <div className="progress-header">
               <div>
-                <div className="card-kicker">
-                  Acompanhamento
-                </div>
-
+                <div className="card-kicker">Acompanhamento</div>
                 <h2>Progresso da campanha</h2>
               </div>
 
@@ -1180,7 +1219,7 @@ export default function ContactsPage() {
                   ? 'Concluída'
                   : processing
                     ? 'Em andamento'
-                    : 'Pronta'}
+                    : 'Interrompida ou aguardando'}
               </span>
             </div>
 
@@ -1192,11 +1231,7 @@ export default function ContactsPage() {
             </div>
 
             <div className="progress-bar">
-              <div
-                style={{
-                  width: `${progress}%`,
-                }}
-              />
+              <div style={{ width: `${progress}%` }} />
             </div>
 
             <div className="progress-stats">
@@ -1213,12 +1248,185 @@ export default function ContactsPage() {
               <div>
                 <span>Restantes</span>
                 <strong>
-                  {Math.max(
-                    0,
-                    campaignTotal - campaignProcessed
-                  )}
+                  {Math.max(0, campaignTotal - campaignProcessed)}
                 </strong>
               </div>
+            </div>
+          </section>
+        )}
+
+        {campaign && (
+          <section className="crm-card progress-card" id="relatorio-disparo">
+            <div className="progress-header">
+              <div>
+                <div className="card-kicker">Relatório do disparo</div>
+                <h2>Números enviados e falhados</h2>
+                <p>
+                  Os resultados abaixo correspondem aos lotes processados
+                  nesta sessão. Enviado significa que a API aceitou a
+                  mensagem; a entrega é confirmada separadamente pelos
+                  status recebidos da Meta.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="contacts-refresh-button"
+                onClick={() =>
+                  downloadCampaignReport(
+                    allReportRows,
+                    `relatorio-disparo-${campaign.id || 'campanha'}.csv`
+                  )
+                }
+                disabled={!allReportRows.length}
+              >
+                <Icon name="file" size={17} />
+                Exportar tudo (CSV)
+              </button>
+            </div>
+
+            <div className="progress-stats">
+              <div>
+                <span>Números enviados</span>
+                <strong>{sentNumbers.length}</strong>
+                <button
+                  type="button"
+                  onClick={() =>
+                    downloadCampaignReport(
+                      sentNumbers,
+                      `numeros-enviados-${campaign.id || 'campanha'}.csv`
+                    )
+                  }
+                  disabled={!sentNumbers.length}
+                >
+                  Exportar enviados
+                </button>
+              </div>
+
+              <div>
+                <span>Números com falha</span>
+                <strong>{failedNumbers.length}</strong>
+                <button
+                  type="button"
+                  onClick={() =>
+                    downloadCampaignReport(
+                      failedNumbers,
+                      `numeros-falhados-${campaign.id || 'campanha'}.csv`
+                    )
+                  }
+                  disabled={!failedNumbers.length}
+                >
+                  Exportar falhas
+                </button>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 24 }}>
+              <h3>Enviados</h3>
+
+              {sentNumbers.length === 0 ? (
+                <p>Nenhum número enviado retornado nesta sessão.</p>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table
+                    style={{
+                      width: '100%',
+                      borderCollapse: 'collapse',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <thead>
+                      <tr>
+                        <th style={{ padding: 10 }}>Nome</th>
+                        <th style={{ padding: 10 }}>Telefone</th>
+                        <th style={{ padding: 10 }}>Template</th>
+                        <th style={{ padding: 10 }}>Data/hora</th>
+                        <th style={{ padding: 10 }}>ID da mensagem</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {sentNumbers.map((row, index) => (
+                        <tr
+                          key={`${row.phone}-${row.message_id || index}`}
+                        >
+                          <td style={{ padding: 10, borderTop: '1px solid #e5e7eb' }}>
+                            {row.name || '—'}
+                          </td>
+                          <td style={{ padding: 10, borderTop: '1px solid #e5e7eb' }}>
+                            {row.phone || '—'}
+                          </td>
+                          <td style={{ padding: 10, borderTop: '1px solid #e5e7eb' }}>
+                            {row.message || '—'}
+                          </td>
+                          <td style={{ padding: 10, borderTop: '1px solid #e5e7eb' }}>
+                            {formatDateTime(row.sent_at)}
+                          </td>
+                          <td
+                            style={{
+                              padding: 10,
+                              borderTop: '1px solid #e5e7eb',
+                              wordBreak: 'break-all',
+                            }}
+                          >
+                            {row.message_id || '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginTop: 24 }}>
+              <h3>Falhas</h3>
+
+              {failedNumbers.length === 0 ? (
+                <p>Nenhuma falha retornada nesta sessão.</p>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table
+                    style={{
+                      width: '100%',
+                      borderCollapse: 'collapse',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <thead>
+                      <tr>
+                        <th style={{ padding: 10 }}>Nome</th>
+                        <th style={{ padding: 10 }}>Telefone</th>
+                        <th style={{ padding: 10 }}>Template</th>
+                        <th style={{ padding: 10 }}>Data/hora</th>
+                        <th style={{ padding: 10 }}>Motivo da falha</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {failedNumbers.map((row, index) => (
+                        <tr key={`${row.phone}-${index}`}>
+                          <td style={{ padding: 10, borderTop: '1px solid #e5e7eb' }}>
+                            {row.name || '—'}
+                          </td>
+                          <td style={{ padding: 10, borderTop: '1px solid #e5e7eb' }}>
+                            {row.phone || '—'}
+                          </td>
+                          <td style={{ padding: 10, borderTop: '1px solid #e5e7eb' }}>
+                            {row.message || '—'}
+                          </td>
+                          <td style={{ padding: 10, borderTop: '1px solid #e5e7eb' }}>
+                            {formatDateTime(row.failed_at)}
+                          </td>
+                          <td style={{ padding: 10, borderTop: '1px solid #e5e7eb' }}>
+                            {row.error || 'Motivo não informado pela API'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </section>
         )}
@@ -1227,9 +1435,7 @@ export default function ContactsPage() {
           <button
             type="button"
             className="contacts-section-toggle"
-            onClick={() =>
-              setShowContacts((current) => !current)
-            }
+            onClick={() => setShowContacts((current) => !current)}
           >
             <div className="contacts-section-title">
               <div className="section-icon">
@@ -1238,16 +1444,11 @@ export default function ContactsPage() {
 
               <div>
                 <strong>Contatos da campanha</strong>
-                <span>
-                  {selectedCount} contatos selecionados
-                </span>
+                <span>{selectedCount} contatos selecionados</span>
               </div>
             </div>
 
-            <Icon
-              name="chevron"
-              size={19}
-            />
+            <Icon name="chevron" size={19} />
           </button>
 
           {showContacts && (
@@ -1259,25 +1460,17 @@ export default function ContactsPage() {
                   <input
                     type="text"
                     value={search}
-                    onChange={(event) =>
-                      setSearch(event.target.value)
-                    }
+                    onChange={(event) => setSearch(event.target.value)}
                     placeholder="Buscar por nome ou telefone..."
                   />
                 </div>
 
                 <div className="drawer-actions">
-                  <button
-                    type="button"
-                    onClick={selectAllFiltered}
-                  >
+                  <button type="button" onClick={selectAllFiltered}>
                     Selecionar exibidos
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={clearSelection}
-                  >
+                  <button type="button" onClick={clearSelection}>
                     Limpar seleção
                   </button>
                 </div>
@@ -1311,9 +1504,7 @@ export default function ContactsPage() {
                           selected ? 'selected' : ''
                         }`}
                         key={contact.id}
-                        onClick={() =>
-                          toggleContact(contact.id)
-                        }
+                        onClick={() => toggleContact(contact.id)}
                       >
                         <span className="contact-checkbox">
                           {selected && (
@@ -1323,20 +1514,14 @@ export default function ContactsPage() {
 
                         <span className="contact-person">
                           <span className="contact-avatar">
-                            {getInitials(
-                              contact.name,
-                              contact.phone
-                            )}
+                            {getInitials(contact.name, contact.phone)}
                           </span>
 
                           <span>
                             <strong>
                               {contact.name || 'Sem nome'}
                             </strong>
-
-                            <small>
-                              ID #{contact.id}
-                            </small>
+                            <small>ID #{contact.id}</small>
                           </span>
                         </span>
 
@@ -1345,9 +1530,7 @@ export default function ContactsPage() {
                         </span>
 
                         <span className="contact-date">
-                          {formatDate(
-                            contact.last_message_at
-                          )}
+                          {formatDate(contact.last_message_at)}
                         </span>
                       </button>
                     );
